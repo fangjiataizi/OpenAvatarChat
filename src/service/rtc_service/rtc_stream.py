@@ -32,9 +32,9 @@ class RtcStream(AsyncAudioVideoStreamHandler):
             expected_layout=expected_layout,
             input_sample_rate=input_sample_rate,
             output_sample_rate=output_sample_rate,
-            output_frame_size=output_frame_size,
-            fps=fps
+            output_frame_size=output_frame_size
         )
+        self.fps = fps  # Store fps as instance variable
         self.client_handler_delegate: Optional[ClientHandlerDelegate] = None
         self.client_session_delegate: Optional[ClientSessionDelegate] = None
 

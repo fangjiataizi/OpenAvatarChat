@@ -39,10 +39,10 @@ if grep -q "AvatarMusetalk:" "$CONFIG_FILE"; then
     echo "Installing chumpy==0.70..."
     uv pip install chumpy==0.70 --no-build-isolation
     
-    echo "Installing mmcv==2.2.0..."
-    uv pip install mmcv==2.2.0 -f https://download.openmmlab.com/mmcv/dist/cu121/torch2.4/index.html
+    echo "Installing mmcv==2.0.1..."
+    uv pip install mmcv==2.0.1 -f https://download.openmmlab.com/mmcv/dist/cpu/torch1.13/index.html
     
     echo "AvatarMusetalk dependencies installation completed."
 else
     echo "No AvatarMusetalk configuration found in config file, skipping dependency installation."
-fi 
+fi

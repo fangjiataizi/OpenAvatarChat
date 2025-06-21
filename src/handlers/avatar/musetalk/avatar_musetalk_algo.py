@@ -35,10 +35,34 @@ from handlers.avatar.liteavatar.model.audio_input import SpeechAudio
 from handlers.avatar.musetalk.musetalk_utils_preprocessing import get_landmark_and_bbox
 
 # Now you can correctly import MuseTalk modules
-from musetalk.utils.face_parsing import FaceParsing
-from musetalk.utils.utils import datagen, load_all_model
-from musetalk.utils.blending import get_image_prepare_material, get_image_blending
-from musetalk.utils.audio_processor import AudioProcessor
+# Temporarily disable musetalk dependencies
+try:
+    from musetalk.utils.face_parsing import FaceParsing
+    from musetalk.utils.utils import datagen, load_all_model
+    from musetalk.utils.blending import get_image_prepare_material, get_image_blending
+    from musetalk.utils.audio_processor import AudioProcessor
+except ImportError:
+    # Define placeholder classes and functions if musetalk is not available
+    class FaceParsing:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __call__(self, *args, **kwargs):
+            return None
+    
+    class AudioProcessor:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __call__(self, *args, **kwargs):
+            return None
+    
+    def datagen(*args, **kwargs):
+        return None
+    def load_all_model(*args, **kwargs):
+        return None
+    def get_image_prepare_material(*args, **kwargs):
+        return None
+    def get_image_blending(*args, **kwargs):
+        return None
 
 builtins.input = lambda prompt='': "y"
 
@@ -255,7 +279,7 @@ class MuseAvatarV15:
         else:
             logger.info(f"Avatar {self.avatar_id} exists and is complete, loading existing data...")
             # Load existing data
-            self.input_latent_list_cycle = torch.load(self.latents_out_path)
+            self.input_latent_list_cycle = torch.load(self.latents_out_path, weights_only=False)
             with open(self.coords_path, 'rb') as f:
                 self.coord_list_cycle = pickle.load(f)
             with open(self.frames_path, 'rb') as f:

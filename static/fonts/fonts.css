@@ -1,0 +1,14 @@
+/* 字体定义 */
+@font-face {
+    font-family: 'ui-sans-serif';
+    src: local('system-ui'), local('-apple-system'), local('BlinkMacSystemFont');
+    font-weight: normal;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'system-ui';
+    src: local('system-ui'), local('-apple-system'), local('BlinkMacSystemFont');
+    font-weight: normal;
+    font-style: normal;
+}

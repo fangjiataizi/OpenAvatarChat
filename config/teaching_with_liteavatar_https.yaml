@@ -1,0 +1,65 @@
+default:
+  logger:
+    log_level: "INFO"
+  service:
+    host: "0.0.0.0"
+    port: 8443  # HTTPS端口
+    # SSL配置
+    cert_file: "ssl_certs/localhost.crt"
+    cert_key: "ssl_certs/localhost.key"
+  chat_engine:
+    model_root: "models"
+    handler_search_path:
+      - "src/handlers"
+    handler_configs:
+      # RTC客户端
+      RtcClient:
+        module: client/rtc_client/client_handler_rtc
+        concurrent_limit: 1
+        turn_config:
+          urls:
+            - "stun:47.92.248.48:3478"
+            - "turn:47.92.248.48:3478"
+            - "stun:stun.l.google.com:19302"
+          username: "username"
+          credential: "password"
+      
+      # VAD语音检测
+      SileroVad:
+        module: vad/silerovad/vad_handler_silero
+        speaking_threshold: 0.5
+        start_delay: 2048
+        end_delay: 5000
+        buffer_look_back: 5000
+        speech_padding: 512
+      
+      # 语音识别
+      SenseVoice:
+        enabled: True
+        module: asr/sensevoice/asr_handler_sensevoice
+        model_name: "iic/SenseVoiceSmall"
+      
+      # TTS语音合成
+      Edge_TTS:
+        enabled: True
+        module: tts/edgetts/tts_handler_edgetts
+        voice: "zh-CN-XiaoxiaoNeural"
+      
+      # LLM大模型
+      LLM_Bailian:
+        enabled: True
+        module: llm/openai_compatible/llm_handler_openai_compatible
+        model_name: "qwen-vl-plus"
+        enable_video_input: True
+        system_prompt: "你是一位专业的AI数学教师，名叫小慧老师。请用亲切、耐心的语气进行教学，每次回答控制在2-3句话内。注重启发式教学，多用提问引导学生思考。对于数学问题，请先分析思路再给出解答步骤。"
+        api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        api_key: "sk-89fee17de18c4f65b76273b1d5d91f3e"
+      
+      # LiteAvatar数字人
+      AvatarLiteAvatar:
+        module: avatar/liteavatar/avatar_handler_liteavatar
+        avatar_name: "sample_data"
+        fps: 25
+        debug: false
+        enable_fast_mode: true
+        use_gpu: false

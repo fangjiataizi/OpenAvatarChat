@@ -7,8 +7,20 @@ import cv2
 import pickle
 import os
 import json
-from mmpose.apis import inference_topdown, init_model
-from mmpose.structures import merge_data_samples
+# from mmpose.apis import inference_topdown, init_model
+# from mmpose.structures import merge_data_samples
+# Temporarily disable mmpose dependency
+try:
+    from mmpose.apis import inference_topdown, init_model
+    from mmpose.structures import merge_data_samples
+except ImportError:
+    # Define placeholder functions if mmpose is not available
+    def inference_topdown(*args, **kwargs):
+        return None
+    def init_model(*args, **kwargs):
+        return None
+    def merge_data_samples(*args, **kwargs):
+        return None
 import torch
 from tqdm import tqdm
 
@@ -59,9 +71,13 @@ def get_bbox_range(img_list,upperbondrange =0):
     for fb in tqdm(batches):
         results = inference_topdown(model, np.asarray(fb)[0])
         results = merge_data_samples(results)
-        keypoints = results.pred_instances.keypoints
-        face_land_mark= keypoints[0][23:91]
-        face_land_mark = face_land_mark.astype(np.int32)
+        if results is None or not hasattr(results, 'pred_instances') or results.pred_instances is None:
+            # Create dummy landmarks if mmpose is not working
+            face_land_mark = np.zeros((68, 2), dtype=np.int32)
+        else:
+            keypoints = results.pred_instances.keypoints
+            face_land_mark= keypoints[0][23:91]
+            face_land_mark = face_land_mark.astype(np.int32)
         
         # get bounding boxes by face detetion
         bbox = fa.get_detections_for_batch(np.asarray(fb))
@@ -100,9 +116,22 @@ def get_landmark_and_bbox(img_list,upperbondrange =0):
     for fb in tqdm(batches):
         results = inference_topdown(model, np.asarray(fb)[0])
         results = merge_data_samples(results)
-        keypoints = results.pred_instances.keypoints
-        face_land_mark= keypoints[0][23:91]
-        face_land_mark = face_land_mark.astype(np.int32)
+        
+        # Check if results and pred_instances are valid
+        if results is None or not hasattr(results, 'pred_instances') or results.pred_instances is None:
+            print(f"Warning: mmpose inference failed for batch, using dummy landmarks")
+            # Create dummy landmarks as fallback
+            dummy_landmarks = np.zeros((68, 2), dtype=np.int32)
+            face_land_mark = dummy_landmarks[23:91]
+        else:
+            keypoints = results.pred_instances.keypoints
+            if keypoints is None or len(keypoints) == 0:
+                print(f"Warning: No keypoints detected, using dummy landmarks")
+                dummy_landmarks = np.zeros((68, 2), dtype=np.int32)
+                face_land_mark = dummy_landmarks[23:91]
+            else:
+                face_land_mark = keypoints[0][23:91]
+                face_land_mark = face_land_mark.astype(np.int32)
         
         # get bounding boxes by face detetion
         bbox = fa.get_detections_for_batch(np.asarray(fb))

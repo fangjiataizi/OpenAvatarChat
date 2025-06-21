@@ -1,5 +1,3 @@
-
-
 import re
 from typing import Dict, Optional, cast
 from loguru import logger
@@ -54,7 +52,7 @@ class HandlerASR(HandlerBase, ABC):
 
         if torch.cuda.is_available():
             self.device = torch.device("cuda:0")
-        elif torch.mps.is_available():
+        elif hasattr(torch, 'mps') and hasattr(torch.mps, 'is_available') and torch.mps.is_available():
             self.device = torch.device("mps")
         else:
             self.device = torch.device("cpu")
