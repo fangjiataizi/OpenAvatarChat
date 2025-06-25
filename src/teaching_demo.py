@@ -41,7 +41,7 @@ def parse_args():
 def create_fastapi_app() -> FastAPI:
     """创建FastAPI应用"""
     app = FastAPI(title="AI在线教学平台", description="基于数字人的1v1在线教学系统")
-    
+
     @app.get("/")
     def get_root():
         return RedirectResponse(url="/ui")
@@ -52,7 +52,7 @@ def create_fastapi_app() -> FastAPI:
     def get_font():
         # 移除字体请求错误
         return {}
-    
+
     return app
 
 
@@ -60,7 +60,7 @@ def setup_teaching_platform():
     """设置教学平台"""
     # 创建FastAPI应用
     app = create_fastapi_app()
-    
+                
     # 创建Gradio界面（在这个过程中会自动绑定事件）
     gradio_block, components, rtc_container = teaching_api.frontend.create_gradio_interface()
     
@@ -76,11 +76,18 @@ def main():
     logger_config, service_config, engine_config = load_configs(args)
     logger.info("Configuration loaded successfully")
 
+    # 检查是否有存储配置
+    config_path = args.config
+    storage_enabled = False
+    if 'storage' in config_path or 'with_storage' in config_path:
+        storage_enabled = True
+        logger.info("Storage layer detected in configuration")
+
     # 设置教学平台
     app, demo, rtc_container, components = setup_teaching_platform()
-    
+
     # 初始化后端系统
-    success = teaching_api.initialize(engine_config, app, demo, rtc_container)
+    success = teaching_api.initialize(engine_config, app, demo, rtc_container, storage_enabled)
     
     if success:
         logger.info("Teaching platform initialized successfully")

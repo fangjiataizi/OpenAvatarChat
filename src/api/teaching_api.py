@@ -7,6 +7,7 @@ AI在线教学平台 - API接口层
 
 import gradio as gr
 from typing import List, Dict, Tuple, Any
+from loguru import logger
 
 from src.backend.teaching_backend import teaching_backend
 from src.frontend.teaching_frontend import teaching_frontend
@@ -19,8 +20,24 @@ class TeachingAPI:
         self.backend = teaching_backend
         self.frontend = teaching_frontend
     
-    def initialize(self, engine_config, app, demo, rtc_container):
+    def initialize(self, engine_config, app, demo, rtc_container, storage_enabled=False):
         """初始化系统"""
+        if storage_enabled:
+            try:
+                from src.backend.teaching_backend_with_storage import TeachingBackendWithStorage
+                self.backend = TeachingBackendWithStorage()
+                logger.info("Using storage-enabled backend")
+            except ImportError:
+                logger.warning("Storage backend not available, using standard backend")
+                storage_enabled = False
+        
+        if not storage_enabled:
+            logger.info("Using standard backend")
+        
+        # 设置前端更新回调，让AI主动消息能立即更新前端
+        self.backend.set_frontend_update_callback(self.update_real_chat_display)
+        logger.info("Frontend update callback set for real-time AI message display")
+        
         success = self.backend.initialize_chat_engine(engine_config, app, demo, rtc_container)
         if success:
             self.backend.start_log_monitor()
@@ -30,12 +47,19 @@ class TeachingAPI:
     
     def start_learning_session(self, course: str, difficulty: str, goal: str) -> Tuple[Any, ...]:
         """开始学习会话 - API接口"""
+        logger.info(f"Starting learning session: course={course}, difficulty={difficulty}, goal={goal}")
+        
+        # 设置当前会话信息（用于AI主动问候）
+        self.backend.set_current_session_info(course, difficulty, goal)
+        
         # 创建学习会话
         session_data = self.backend.create_learning_session(course, difficulty, goal)
         
         # 生成前端显示内容
         course_info_html = self.frontend.create_course_info_html(course, difficulty, goal)
         real_chat_html = self.frontend.build_chat_html([])
+        
+        logger.info("Session started successfully, switching to teacher chat page")
         
         return (
             gr.update(visible=False),  # course_selection_page - 隐藏课程选择页面
@@ -122,6 +146,14 @@ class TeachingAPI:
     def auto_update_chat(self) -> Any:
         """自动更新对话（定时器触发）- API接口"""
         return self.update_real_chat_display()
+    
+    def toggle_auto_refresh(self, current_state: bool) -> Tuple[Any, bool]:
+        """切换自动刷新状态"""
+        new_state = not current_state
+        button_text = "🔄 自动刷新: 启用" if new_state else "🔄 自动刷新: 禁用"
+        button_variant = "primary" if new_state else "secondary"
+        
+        return gr.update(value=button_text, variant=button_variant), new_state
     
     # ========== 事件绑定 ==========
     
@@ -253,21 +285,22 @@ class TeachingAPI:
         #     ]
         # )
         
-        # # 真实对话控制按钮事件
-        # components['test_chat_btn'].click(
-        #     fn=self.test_chat_display,
-        #     outputs=[components['real_chat_display']]
-        # )
+        # 真实对话控制按钮事件
+        components['refresh_chat_btn'].click(
+            fn=self.refresh_chat_display,
+            outputs=[components['real_chat_display']]
+        )
         
-        # components['refresh_chat_btn'].click(
-        #     fn=self.refresh_chat_display,
-        #     outputs=[components['real_chat_display']]
-        # )
+        components['clear_chat_btn'].click(
+            fn=self.clear_chat_display,
+            outputs=[components['real_chat_display']]
+        )
         
-        # components['clear_chat_btn'].click(
-        #     fn=self.clear_chat_display,
-        #     outputs=[components['real_chat_display']]
-        # )
+        components['auto_toggle_btn'].click(
+            fn=self.toggle_auto_refresh,
+            inputs=[components['auto_refresh_state']],
+            outputs=[components['auto_toggle_btn'], components['auto_refresh_state']]
+        )
         
         # # 调试信息按钮事件
         # components['debug_btn'].click(
@@ -275,21 +308,30 @@ class TeachingAPI:
         #     outputs=[components['debug_info_display']]
         # )
         
-        # 定时更新真实对话显示（每3秒检查一次）
-        try:
-            # Gradio 4.x 支持定时器
-            timer = gr.Timer(3.0)  # 每3秒触发一次
-            timer.tick(
-                fn=self.auto_update_chat,
+        # 🎯 方案一：Timer定时器（现代化响应式更新）
+        if 'refresh_timer' in components:
+            # 使用Timer每2秒自动更新对话显示
+            components['refresh_timer'].tick(
+                fn=self.update_real_chat_display,
+                inputs=[],
                 outputs=[components['real_chat_display']]
             )
-        except:
-            # 如果不支持Timer，可以使用其他方式
-            pass
+            
+            logger.info("🎯 Timer-based auto-refresh configured (every 2 seconds)")
+
     
     def stop(self):
         """停止API服务"""
         self.backend.stop_log_monitor()
+
+    def get_message_update_trigger(self) -> int:
+        """获取消息更新触发器值 - 用于前端状态监听"""
+        return self.backend.message_update_trigger
+        
+    def auto_update_chat_reactive(self, trigger_value: int) -> Any:
+        """基于触发器的响应式自动更新对话"""
+        # 当触发器值变化时，自动更新聊天显示
+        return self.update_real_chat_display()
 
 
 # 全局API实例

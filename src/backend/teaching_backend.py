@@ -21,6 +21,15 @@ from engine_utils.directory_info import DirectoryInfo
 from src.chat_engine.chat_engine import ChatEngine
 from src.chat_engine.data_models.chat_engine_config_data import ChatEngineConfigModel
 
+# 导入存储服务
+try:
+    from src.storage.services import learning_session_service, user_service
+    STORAGE_AVAILABLE = True
+    logger.info("Storage services imported successfully")
+except ImportError as e:
+    STORAGE_AVAILABLE = False
+    logger.warning(f"Storage services not available: {e}")
+
 project_dir = DirectoryInfo.get_project_dir()
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
@@ -34,10 +43,20 @@ class TeachingBackend:
         self.real_chat_queue = queue.Queue()
         self.log_monitor_thread = None
         self.log_monitor_running = False
+        self.real_chat_messages = []
+        self.all_chat_messages = []
+        self.chat_history_lock = threading.Lock()
         
         # AI LLM配置
         self.llm_config = None
         self.use_real_ai = False
+        
+        # AI主动教学相关
+        self.current_course = None
+        self.current_difficulty = None
+        self.current_goal = None
+        self.has_greeted = False  # 是否已经问候过
+        self.webrtc_connected = False  # WebRTC是否已连接
         
         # 雅思课程内容配置
         self.course_content = {
@@ -62,6 +81,34 @@ class TeachingBackend:
                 "examples": ["Could you tell me about your hometown?", "Describe a memorable experience..."]
             }
         }
+        
+        # 定时器管理
+        self.active_timers = []
+        self.teaching_active = False
+        
+        # 前端更新机制
+        self.frontend_update_callback = None
+        self.frontend_update_timer = None
+        self.frontend_update_running = False
+        
+        # 会话状态管理 - 按照设计文档2.2实现
+        self.session_state = {
+            "course": None,
+            "difficulty": None, 
+            "goal": None,
+            "stage": "init",  # init, greeting, waiting_user_input, teaching, practice
+            "ai_teaching_active": False,
+            "last_user_activity": time.time(),
+            "message_count": 0
+        }
+        
+        # 添加消息更新触发器 - 用于前端实时更新
+        self.message_update_trigger = 0  # 每次消息变更时自增
+        
+        # 数据存储相关 - 按照设计文档2.7实现
+        self.current_session_key = None  # 当前学习会话key
+        self.current_user_id = 1  # 默认用户ID (后续支持用户系统)
+        self.storage_available = STORAGE_AVAILABLE
     
     def initialize_chat_engine(self, engine_config, app, demo, rtc_container):
         """初始化ChatEngine和AI LLM配置"""
@@ -92,8 +139,9 @@ class TeachingBackend:
             try:
                 if engine_config:
                     self.chat_engine = ChatEngine()
-                    self.chat_engine.initialize(engine_config, app, demo, rtc_container)
-                    logger.info("ChatEngine initialized successfully")
+                    # 正确的参数顺序：(engine_config, app, ui, parent_block)
+                    self.chat_engine.initialize(engine_config, app=app, ui=demo, parent_block=rtc_container)
+                    logger.info("ChatEngine initialized successfully with WebRTC container")
                 else:
                     logger.warning("No engine_config found, using AI LLM only")
             except Exception as chat_engine_error:
@@ -148,12 +196,34 @@ class TeachingBackend:
                                 user_text = self._extract_llm_input(line)
                                 if user_text:
                                     self._add_real_chat_message('human', user_text.strip())
+                                    # 检测WebRTC连接建立（用户首次说话）
+                                    self._handle_webrtc_connection()
                             
                             # 检查AI回复 (current sentence)
                             elif 'current sentence' in line:
                                 ai_text = self._extract_current_sentence(line)
                                 if ai_text:
                                     self._add_real_chat_message('avatar', ai_text.strip())
+                                    
+                            # 检查avatar启动事件 (检测到avatar开始工作)
+                            elif 'on algo processor start' in line:
+                                logger.info("Detected avatar processor start - triggering AI greeting")
+                                self._handle_avatar_start()
+                                
+                            # 检查avatar processor启动完成
+                            elif 'avatar processor started' in line or 'signal2img loop started' in line:
+                                logger.info("Detected avatar processor fully started")
+                                self._handle_avatar_ready()
+                            
+                            # 检查停止聊天信号
+                            elif 'stop_chat' in line:
+                                logger.info("Detected stop_chat signal - stopping AI teaching")
+                                self._stop_ai_teaching()
+                            
+                            # 检查会话结束信号  
+                            elif 'session stopped' in line or 'chat session stopped' in line:
+                                logger.info("Detected session end - stopping AI teaching")
+                                self._stop_ai_teaching()
                         
                         # 更新位置
                         current_position = file.tell()
@@ -202,10 +272,15 @@ class TeachingBackend:
     
     def _add_real_chat_message(self, role: str, content: str):
         """添加真实对话消息到队列，带去重功能"""
+        logger.debug(f"🔍 Adding chat message - Role: {role}, Content: {content[:50]}...")
+        
         # 清理内容格式
         cleaned_content = self._clean_message_content(content)
+        logger.debug(f"🔍 Cleaned content: '{cleaned_content}'")
         
-        if not cleaned_content or len(cleaned_content.strip()) < 2:
+        # 增加长度检查，避免流式输出的短内容
+        if not cleaned_content or len(cleaned_content.strip()) < 3:
+            logger.debug(f"🔍 Content too short or empty, skipping. Length: {len(cleaned_content.strip()) if cleaned_content else 0}")
             return False
         
         # 检查重复消息
@@ -235,7 +310,35 @@ class TeachingBackend:
                 'timestamp': time.time()
             }
             self.real_chat_queue.put(message)
+            logger.info(f"✅ Added real chat message - {role}: {cleaned_content[:50]}...")
+            
+            # 🎯 更新消息触发器，用于状态变化监听
+            self.message_update_trigger += 1
+            logger.debug(f"🔄 Message update trigger incremented to {self.message_update_trigger}")
+            
+            # 保存到数据库 - 集成数据持久化
+            db_message = {
+                "role": role,
+                "content": cleaned_content.strip(),
+                "timestamp": message['timestamp'],
+                "type": "proactive" if role == "avatar" else "normal"
+            }
+            self._save_message_to_database(db_message)
+            
+            # 如果是AI主动消息，立即触发前端更新（实现即时显示）
+            if role == "avatar" and self.frontend_update_callback:
+                try:
+                    self.frontend_update_callback()
+                    logger.debug("🔄 AI message triggered immediate frontend update")
+                except Exception as e:
+                    logger.error(f"Frontend update error: {e}")
+            else:
+                # 用户消息等待前端自动刷新机制处理
+                logger.debug("🔄 Message added to queue, frontend will auto-refresh")
+            
             return True
+        else:
+            logger.debug(f"🔍 Duplicate message found, skipping")
         
         return False
     
@@ -360,8 +463,354 @@ class TeachingBackend:
             
         return None
     
+    def _handle_webrtc_connection(self):
+        """处理WebRTC连接建立事件"""
+        if not self.webrtc_connected:
+            self.webrtc_connected = True
+            logger.info("WebRTC connection detected, preparing for AI greeting")
+            
+            # 延迟3秒后发送AI主动问候，确保系统稳定
+            threading.Timer(3.0, self._send_ai_greeting).start()
+    
+    def _handle_avatar_start(self):
+        """处理Avatar处理器启动事件"""
+        logger.info("Avatar processor started, preparing for AI greeting")
+        # 延迟2秒后发送AI主动问候，让avatar完全就绪
+        timer = threading.Timer(2.0, self._send_ai_greeting)
+        self._add_timer(timer)
+        timer.start()
+        
+    def _handle_avatar_ready(self):
+        """处理Avatar处理器完全就绪事件"""
+        logger.info("Avatar processor is fully ready")
+        # 如果还没有问候过，立即发送问候
+        if not self.has_greeted:
+            timer = threading.Timer(0.5, self._send_ai_greeting)
+            self._add_timer(timer)
+            timer.start()
+    
+    def _send_ai_greeting(self):
+        """发送AI主动问候 - 严格按照设计文档2.3实现"""
+        if self.has_greeted:
+            return
+            
+        self.has_greeted = True
+        self.teaching_active = True
+        
+        # 生成个性化问候语
+        greeting_message = self._generate_greeting_message()
+        
+        logger.info(f"🎓 AI Teacher Greeting: {greeting_message}")
+        
+        # ✅ 核心修复：AI主动消息仅走显示+TTS路径，不触发LLM
+        # 1. 添加到显示队列 (不触发LLM)
+        success = self._add_real_chat_message('avatar', greeting_message)
+        
+        # 2. 发送到TTS管道 (不通过TEXT通道避免触发LLM)
+        tts_success = self._send_to_tts_only(greeting_message)
+        
+        if success and tts_success:
+            logger.info("AI proactive greeting sent and displayed successfully")
+        elif not tts_success:
+            logger.warning("TTS failed for greeting message")
+            
+        # 3. 设置状态为等待用户回复
+        self.session_state = getattr(self, 'session_state', {})
+        self.session_state["stage"] = "waiting_user_input"
+        
+        # 延迟10秒后开始主动教学内容讲授
+        if self.teaching_active:
+            timer = threading.Timer(10.0, self._start_proactive_teaching)
+            self._add_timer(timer)
+            timer.start()
+    
+    def _trigger_frontend_update(self):
+        """触发前端更新的辅助方法"""
+        if self.frontend_update_callback:
+            try:
+                self.frontend_update_callback()
+                logger.debug("🔄 Delayed frontend update triggered")
+            except Exception as e:
+                logger.error(f"Frontend update callback failed: {e}")
+    
+    def _send_avatar_text_through_engine(self, text: str) -> bool:
+        """通过ChatEngine发送Avatar文本数据到TTS和前端显示"""
+        try:
+            if not self.chat_engine:
+                raise Exception("ChatEngine not available")
+                
+            # 获取当前活跃的会话
+            if not hasattr(self.chat_engine, 'sessions') or not self.chat_engine.sessions:
+                raise Exception("No active sessions found")
+                
+            # 通过ChatEngine的会话发送文本数据
+            session = next(iter(self.chat_engine.sessions.values()))
+            
+            # 查找RTC ClientHandler的会话代理
+            rtc_handler = None
+            for handler_name, handler_record in session.handlers.items():
+                if 'Rtc' in handler_name or 'RTC' in handler_name:
+                    rtc_handler = handler_record
+                    break
+            
+            if not rtc_handler:
+                raise Exception("RTC handler not found")
+            
+            # 获取RTC客户端会话代理
+            rtc_context = rtc_handler.env.context
+            if not hasattr(rtc_context, 'client_session_delegate') or not rtc_context.client_session_delegate:
+                raise Exception("RTC client session delegate not found")
+                
+            client_delegate = rtc_context.client_session_delegate
+            
+            # 方法1：直接发送TEXT数据到聊天通道（用于前端显示）
+            self._send_text_to_chat_channel(client_delegate, text)
+            
+            # 方法2：同时发送AVATAR_TEXT数据到TTS（用于语音合成）
+            self._send_avatar_text_to_tts(client_delegate, text, session)
+            
+            logger.info("Avatar text successfully sent to both chat display and TTS")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Failed to send avatar text through ChatEngine: {e}")
+            return False
+    
+    def _send_text_to_chat_channel(self, client_delegate, text: str):
+        """直接发送文本到聊天通道进行显示"""
+        try:
+            from chat_engine.common.engine_channel_type import EngineChannelType
+            
+            # 使用与rtc_stream.py相同的方式发送文本到TEXT通道
+            # 这样WebRTC的process_chat_history会捕获并发送到前端
+            timestamp = client_delegate.get_timestamp()
+            
+            # 直接调用put_data方法，参考rtc_stream.py第216行的调用方式
+            client_delegate.put_data(
+                EngineChannelType.TEXT,
+                text,
+                timestamp,
+                loopback=False  # 不回环，让系统处理这个文本作为Avatar输出
+            )
+            
+            logger.info(f"Avatar text sent to TEXT channel for display: {text[:50]}...")
+            
+        except Exception as e:
+            logger.warning(f"Failed to send text to chat channel: {e}")
+            # 备用方法：使用loopback=True，让系统把这个当作输入然后处理成输出
+            try:
+                timestamp = client_delegate.get_timestamp()
+                client_delegate.put_data(
+                    EngineChannelType.TEXT,
+                    text,
+                    timestamp,
+                    loopback=True  # 回环处理，可能触发LLM生成回应
+                )
+                logger.info("Backup method: text sent with loopback=True")
+                    
+            except Exception as backup_e:
+                logger.warning(f"Backup method also failed: {backup_e}")
+    
+    def _send_avatar_text_to_tts(self, client_delegate, text: str, session):
+        """发送Avatar文本到TTS进行语音合成"""
+        try:
+            from chat_engine.data_models.chat_data.chat_data_model import ChatData
+            from chat_engine.data_models.chat_data_type import ChatDataType
+            from chat_engine.data_models.runtime_data.data_bundle import DataBundle
+            from uuid import uuid4
+            
+            # 创建AVATAR_TEXT数据包用于TTS
+            session_context = session.session_context
+            definition = session_context.get_input_text_definition("avatar_text")
+            data_bundle = DataBundle(definition)
+            data_bundle.set_main_data(text)
+            data_bundle.add_meta('speech_id', str(uuid4()))
+            data_bundle.add_meta('avatar_text_end', True)
+            
+            chat_data = ChatData(
+                source="ai_teacher",
+                type=ChatDataType.AVATAR_TEXT,
+                data=data_bundle,
+                timestamp=session_context.get_timestamp()
+            )
+            
+            # 通过数据提交器直接提交AVATAR_TEXT数据到TTS
+            if hasattr(client_delegate, 'data_submitter') and client_delegate.data_submitter:
+                client_delegate.data_submitter.submit(chat_data)
+                logger.info("Avatar text submitted to TTS pipeline")
+            else:
+                logger.warning("Data submitter not found, TTS may not work")
+                # 不使用put_data_async，因为这个方法可能不存在
+                
+        except Exception as e:
+            logger.warning(f"Failed to send avatar text to TTS: {e}")
+    
+    def _start_proactive_teaching(self):
+        """开始主动教学内容讲授 - 按照设计文档2.5实现"""
+        if not self.current_course or not self.teaching_active:
+            return
+            
+        # 根据课程生成教学内容（不使用LLM）
+        teaching_content = self._generate_teaching_content()
+        
+        logger.info(f"🎓 AI Teacher Starting Lesson: {teaching_content[:50]}...")
+        
+        # ✅ 核心修复：AI主动教学内容仅走显示+TTS路径，不触发LLM
+        # 1. 添加到显示队列 (不触发LLM)
+        success = self._add_real_chat_message('avatar', teaching_content)
+        
+        # 2. 发送到TTS管道 (不通过TEXT通道避免触发LLM)
+        tts_success = self._send_to_tts_only(teaching_content)
+        
+        if success and tts_success:
+            logger.info("AI proactive teaching content sent successfully")
+        elif not tts_success:
+            logger.warning("TTS failed for teaching content")
+            
+        # 继续定期发送教学内容
+        if self.teaching_active:
+            timer = threading.Timer(30.0, self._continue_teaching)
+            self._add_timer(timer)
+            timer.start()
+        
+    def _continue_teaching(self):
+        """继续教学内容 - 按照设计文档2.5实现"""
+        if not self.current_course or not self.teaching_active:
+            return
+            
+        # 生成下一段教学内容（不使用LLM）
+        next_content = self._generate_next_teaching_content()
+        
+        if next_content:
+            logger.info(f"🎓 AI Teacher Continue: {next_content[:50]}...")
+            
+            # ✅ 核心修复：AI主动教学内容仅走显示+TTS路径，不触发LLM
+            # 1. 添加到显示队列 (不触发LLM)
+            success = self._add_real_chat_message('avatar', next_content)
+            
+            # 2. 发送到TTS管道 (不通过TEXT通道避免触发LLM)
+            tts_success = self._send_to_tts_only(next_content)
+            
+            if success and tts_success:
+                logger.info("AI continue teaching content sent successfully")
+            elif not tts_success:
+                logger.warning("TTS failed for continue teaching content")
+                
+            # 继续循环教学
+            if self.teaching_active:
+                timer = threading.Timer(25.0, self._continue_teaching)
+                self._add_timer(timer)
+                timer.start()
+    
+    def _generate_teaching_content(self) -> str:
+        """生成教学内容"""
+        course = self.current_course or "雅思 - 基础语法"
+        difficulty = self.current_difficulty or "初级"
+        
+        if "基础语法" in course:
+            contents = [
+                f"好的，现在让我们开始{course}的学习。首先，我想问一下，你对英语时态掌握得怎么样？我们先来复习一下现在完成时。",
+                f"现在完成时的基本结构是：have/has + 过去分词。比如'I have studied English for 3 years'。你能告诉我这个句子表达的是什么意思吗？",
+                f"在雅思考试中，现在完成时经常出现在写作和口语部分。让我们来看一个实际的例子..."
+            ]
+        elif "词汇记忆" in course:
+            contents = [
+                f"接下来我们学习{course}。词汇是雅思考试的基础，我将教你一些高效的记忆方法。",
+                f"首先是词根记忆法。比如'beneficial'这个单词，我们可以分解为'benefit'加上后缀'-ial'。",
+                f"你知道'significant'这个词的同义词有哪些吗？在雅思写作中，使用同义词替换非常重要。"
+            ]
+        elif "写作技巧" in course:
+            contents = [
+                f"现在我们开始{course}的学习。雅思写作分为Task1和Task2两部分。",
+                f"Task1通常是图表作文，开头段的表达很重要。比如'The chart shows that...'是一个常用的开头。",
+                f"对于{difficulty}水平的学生，我建议先掌握基本的句型结构，然后再追求语言的多样性。"
+            ]
+        elif "口语练习" in course:
+            contents = [
+                f"欢迎来到{course}！口语是很多同学的难点，但不用担心，我会帮助你提高的。",
+                f"雅思口语分为三个部分。Part1是日常话题，比如'Could you tell me about your hometown?'",
+                f"流利度比准确性更重要。即使有小错误，保持流利的表达也能获得好分数。"
+            ]
+        else:
+            contents = [
+                f"让我们开始今天的{course}学习。我会根据你的{difficulty}水平来调整教学内容。",
+                f"如果你有任何问题，随时可以打断我。学习是一个互动的过程。",
+                f"我们先从基础概念开始，然后逐步深入到更复杂的内容。"
+            ]
+            
+        return random.choice(contents)
+    
+    def _generate_next_teaching_content(self) -> str:
+        """生成下一段教学内容"""
+        course = self.current_course or "雅思"
+        
+        next_contents = [
+            "你有什么问题想问我吗？或者我们继续下一个知识点？",
+            "让我们来做一个小练习。请试着用刚才学到的知识造一个句子。",
+            "很好！现在我们来学习下一个重要概念。在雅思考试中，这个知识点经常出现。",
+            "你觉得刚才的内容理解得怎么样？需要我再详细解释一下吗？",
+            "我注意到很多学生在这个地方容易出错。让我给你一些实用的技巧。"
+        ]
+        
+        return random.choice(next_contents)
+    
+    def _generate_greeting_message(self) -> str:
+        """生成个性化问候消息"""
+        course = self.current_course or "课程"
+        difficulty = self.current_difficulty or "适合"
+        goal = self.current_goal
+        
+        greetings = [
+            f"你好！我是小慧老师，很高兴为你开始{course}的学习。",
+            f"欢迎来到{course}课堂！我是你的专属AI教师小慧。",
+            f"你好，同学！我是小慧老师，今天我们一起学习{course}。"
+        ]
+        
+        base_greeting = random.choice(greetings)
+        
+        # 添加个性化内容
+        if goal and goal.strip():
+            personal_part = f"我注意到你的学习目标是：{goal}。我会根据这个目标为你制定学习计划。"
+        else:
+            personal_part = f"我会根据你选择的{difficulty}难度，为你提供个性化的教学指导。"
+        
+        encouragement = "准备好开始我们的学习之旅了吗？有什么问题随时告诉我！"
+        
+        return f"{base_greeting}\n\n{personal_part}\n\n{encouragement}"
+    
+    def set_current_session_info(self, course: str, difficulty: str, goal: str):
+        """设置当前学习会话信息 - 按照设计文档2.2实现"""
+        # 先停止之前的教学活动
+        self._stop_ai_teaching()
+        
+        # 设置新的会话信息
+        self.current_course = course
+        self.current_difficulty = difficulty
+        self.current_goal = goal
+        self.has_greeted = False  # 重置问候状态
+        self.webrtc_connected = False  # 重置连接状态
+        self.teaching_active = False  # 重置教学状态
+        
+        # 更新会话状态
+        self.session_state.update({
+            "course": course,
+            "difficulty": difficulty,
+            "goal": goal,
+            "stage": "waiting_connection",
+            "ai_teaching_active": False,
+            "last_user_activity": time.time(),
+            "message_count": 0
+        })
+        
+        logger.info(f"Session info updated: {course} - {difficulty}")
+        logger.info("AI will greet automatically when avatar is ready")
+
     def create_learning_session(self, course: str, difficulty: str, goal: str) -> Dict:
-        """创建学习会话"""
+        """创建学习会话 - 包含数据库持久化"""
+        
+        # 创建数据库会话
+        session_key = self.create_database_session(course, difficulty, goal)
+        
         # 生成个性化的课程系统提示
         system_prompt = f"""你是一位专业的AI雅思英语教师，名叫小慧老师。
 当前教学设置：
@@ -388,13 +837,24 @@ class TeachingBackend:
             {"role": "teacher", "content": welcome_message}
         ]
         
+        # 保存系统提示到数据库
+        if session_key:
+            self._save_message_to_database({
+                "role": "system",
+                "content": system_prompt,
+                "timestamp": time.time(),
+                "type": "system"
+            })
+        
         return {
             "course": course,
             "difficulty": difficulty,
             "goal": goal,
             "system_prompt": system_prompt,
             "welcome_message": welcome_message,
-            "chat_history": initial_history
+            "chat_history": initial_history,
+            "session_key": session_key,
+            "storage_enabled": self.storage_available
         }
     
     def generate_teaching_response(self, student_message: str, course: str, difficulty: str, chat_history: List[Dict]) -> str:
@@ -573,6 +1033,348 @@ class TeachingBackend:
         if self.log_monitor_thread:
             self.log_monitor_thread.join(timeout=1)
         logger.info("Log monitor stopped")
+    
+    def _stop_ai_teaching(self):
+        """停止AI教学活动"""
+        logger.info("🛑 Stopping AI teaching activities...")
+        
+        # 设置停止标志
+        self.teaching_active = False
+        self.has_greeted = False
+        self.webrtc_connected = False
+        
+        # 取消所有活跃的定时器
+        for timer in self.active_timers:
+            if timer.is_alive():
+                timer.cancel()
+                logger.info(f"Cancelled active timer: {timer}")
+        
+        self.active_timers.clear()
+        logger.info("✅ AI teaching stopped and all timers cleared")
+    
+    def _add_timer(self, timer: threading.Timer):
+        """添加定时器到管理列表"""
+        self.active_timers.append(timer)
+        # 清理已完成的定时器
+        self.active_timers = [t for t in self.active_timers if t.is_alive()]
+    
+    def set_frontend_update_callback(self, callback_func):
+        """设置前端更新回调函数"""
+        self.frontend_update_callback = callback_func
+        
+    def start_frontend_auto_update(self):
+        """启动前端自动更新"""
+        if self.frontend_update_running:
+            return
+            
+        self.frontend_update_running = True
+        self._schedule_frontend_update()
+        logger.info("Frontend auto-update started")
+    
+    def stop_frontend_auto_update(self):
+        """停止前端自动更新"""
+        self.frontend_update_running = False
+        if self.frontend_update_timer:
+            self.frontend_update_timer.cancel()
+        logger.info("Frontend auto-update stopped")
+    
+    def _schedule_frontend_update(self):
+        """安排下次前端更新"""
+        if not self.frontend_update_running:
+            return
+            
+        def update_frontend():
+            if self.frontend_update_callback and self.frontend_update_running:
+                try:
+                    # 调用前端更新函数
+                    self.frontend_update_callback()
+                except Exception as e:
+                    logger.error(f"Frontend update error: {e}")
+            
+            # 安排下次更新
+            if self.frontend_update_running:
+                self._schedule_frontend_update()
+        
+        # 3秒后执行更新
+        self.frontend_update_timer = threading.Timer(3.0, update_frontend)
+        self.frontend_update_timer.start()
+
+
+    def _add_display_message(self, role: str, content: str, message_type: str = "normal"):
+        """统一消息处理 - 按照设计文档2.6实现
+        
+        Args:
+            role: "human" | "avatar" 
+            content: 消息内容
+            message_type: "normal" | "proactive" | "response"
+        """
+        try:
+            # 1. 内容清理和验证
+            cleaned_content = self._clean_message_content(content)
+            
+            logger.debug(f"🔍 Adding display message - Role: {role}, Type: {message_type}, Content: {cleaned_content[:50]}...")
+            
+            # 2. 长度检查避免垃圾消息
+            if len(cleaned_content) < 3:  # 过滤短消息和流式输出片段，降低阈值以适应测试
+                logger.debug(f"🔍 Content too short or empty, skipping. Length: {len(cleaned_content)}")
+                return False
+                
+            # 3. 重复检查
+            if self._is_duplicate_message_queue(role, cleaned_content):
+                logger.debug(f"🔍 Duplicate message found, skipping")
+                return False
+                
+            # 4. 添加到实时队列
+            message = {
+                "role": role,
+                "content": cleaned_content, 
+                "timestamp": time.time(),
+                "type": message_type
+            }
+            
+            # 确保队列存在
+            if not hasattr(self, 'real_chat_queue'):
+                import queue
+                self.real_chat_queue = queue.Queue()
+                
+            self.real_chat_queue.put(message)
+            
+            # 5. 持久化存储 (异步) - 按照设计文档2.7实现
+            self._save_message_to_database(message)
+            
+            # 6. 触发前端更新 (延迟)
+            if self.frontend_update_callback:
+                timer = threading.Timer(2.0, self._trigger_frontend_update)
+                self._add_timer(timer)
+                timer.start()
+            
+            logger.info(f"✅ Added display message - {role} ({message_type}): {cleaned_content[:50]}...")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error adding display message: {e}")
+            return False
+    
+    def _is_duplicate_message_queue(self, role: str, content: str) -> bool:
+        """检查是否为重复消息（队列版本）"""
+        if not hasattr(self, 'real_chat_queue'):
+            return False
+            
+        temp_messages = []
+        duplicate_found = False
+        
+        # 检查队列中的所有消息
+        while not self.real_chat_queue.empty():
+            try:
+                existing_msg = self.real_chat_queue.get_nowait()
+                temp_messages.append(existing_msg)
+                
+                # 检查是否与现有消息重复
+                if (existing_msg.get('role') == role and 
+                    existing_msg.get('content', '').strip() == content.strip()):
+                    duplicate_found = True
+                    logger.debug(f"🔍 Found duplicate: '{existing_msg.get('content', '')[:30]}...'")
+                    break  # 找到重复就退出
+            except:
+                break
+        
+        # 将消息放回队列（按原来的顺序）
+        for msg in temp_messages:
+            self.real_chat_queue.put(msg)
+            
+        return duplicate_found
+        
+    def _send_to_tts_only(self, text: str) -> bool:
+        """仅发送到TTS管道，不触发LLM - 按照设计文档2.3实现"""
+        try:
+            if not self.chat_engine:
+                logger.warning("ChatEngine not available for TTS, using fallback method")
+                logger.info(f"current sentence{text}")
+                return True
+                
+            # 获取当前活跃的会话
+            if not hasattr(self.chat_engine, 'sessions') or not self.chat_engine.sessions:
+                logger.warning("No active sessions found for TTS")
+                return False
+                
+            session = next(iter(self.chat_engine.sessions.values()))
+            
+            # 查找RTC ClientHandler的会话代理
+            rtc_handler = None
+            for handler_name, handler_record in session.handlers.items():
+                if 'Rtc' in handler_name or 'RTC' in handler_name:
+                    rtc_handler = handler_record
+                    break
+            
+            if not rtc_handler:
+                logger.warning("RTC handler not found for TTS")
+                return False
+            
+            # 获取RTC客户端会话代理
+            rtc_context = rtc_handler.env.context
+            if not hasattr(rtc_context, 'client_session_delegate') or not rtc_context.client_session_delegate:
+                logger.warning("RTC client session delegate not found for TTS")
+                return False
+                
+            client_delegate = rtc_context.client_session_delegate
+            
+            # ✅ 核心修复：仅发送AVATAR_TEXT数据到TTS，不通过TEXT通道
+            success = self._send_avatar_text_to_tts(client_delegate, text, session)
+            
+            if success:
+                logger.info("Avatar text submitted to TTS pipeline successfully")
+                return True
+            else:
+                # 备用方法：使用日志触发TTS
+                logger.warning("Direct TTS method failed, using log fallback")
+                logger.info(f"current sentence{text}")
+                return True
+                
+        except Exception as e:
+            logger.warning(f"Failed to send text to TTS: {e}")
+            # 备用方法：使用日志触发TTS
+            logger.info(f"current sentence{text}")
+            return True
+    
+    # ==================== 数据存储方法 - 按照设计文档2.7实现 ====================
+    
+    def _save_message_to_database(self, message: Dict) -> bool:
+        """保存消息到数据库 - 异步执行"""
+        if not self.storage_available or not self.current_session_key:
+            logger.debug("Storage not available or no active session, skipping database save")
+            return False
+        
+        def save_async():
+            try:
+                success = learning_session_service.add_message_to_session(
+                    session_key=self.current_session_key,
+                    role=message.get('role'),
+                    content=message.get('content'),
+                    message_type=message.get('type', 'normal'),
+                    metadata={
+                        'timestamp': message.get('timestamp'),
+                        'source': 'teaching_backend'
+                    }
+                )
+                
+                if success:
+                    logger.debug(f"Message saved to database: {message.get('role')} - {message.get('content', '')[:30]}...")
+                else:
+                    logger.warning("Failed to save message to database")
+                    
+            except Exception as e:
+                logger.error(f"Error saving message to database: {e}")
+        
+        # 异步执行保存操作
+        save_thread = threading.Thread(target=save_async, daemon=True)
+        save_thread.start()
+        return True
+    
+    def create_database_session(self, course: str, difficulty: str, goal: str) -> Optional[str]:
+        """创建数据库学习会话"""
+        if not self.storage_available:
+            logger.info("Storage not available, using in-memory session only")
+            return None
+        
+        try:
+            session_data = learning_session_service.create_session(
+                user_id=self.current_user_id,
+                course_name=course,
+                difficulty=difficulty,
+                goal=goal
+            )
+            
+            if session_data:
+                session_key = session_data.get('session_key')
+                self.current_session_key = session_key
+                logger.info(f"Database learning session created: {session_key}")
+                return session_key
+            else:
+                logger.error("Failed to create database session")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error creating database session: {e}")
+            return None
+    
+    def end_database_session(self) -> bool:
+        """结束数据库学习会话"""
+        if not self.storage_available or not self.current_session_key:
+            return False
+        
+        try:
+            success = learning_session_service.end_session(self.current_session_key)
+            if success:
+                logger.info(f"Database session ended: {self.current_session_key}")
+                self.current_session_key = None
+                return True
+            else:
+                logger.warning("Failed to end database session")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error ending database session: {e}")
+            return False
+    
+    def get_session_statistics(self) -> Dict:
+        """获取当前会话统计信息"""
+        if not self.storage_available or not self.current_session_key:
+            return {
+                "storage_available": False,
+                "session_active": False
+            }
+        
+        try:
+            stats = learning_session_service.get_session_statistics(self.current_session_key)
+            stats["storage_available"] = True
+            stats["session_active"] = True
+            stats["session_key"] = self.current_session_key
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error getting session statistics: {e}")
+            return {"error": str(e)}
+    
+    def restore_session_from_database(self, session_key: str) -> bool:
+        """从数据库恢复会话状态"""
+        if not self.storage_available:
+            return False
+        
+        try:
+            session_data = learning_session_service.get_session(session_key)
+            if not session_data:
+                logger.warning(f"Session not found in database: {session_key}")
+                return False
+            
+            # 恢复会话信息
+            self.current_session_key = session_key
+            metadata = session_data.get('session_metadata', {})
+            
+            if metadata:
+                self.current_course = metadata.get('course_name')
+                self.current_difficulty = metadata.get('difficulty')
+                self.current_goal = metadata.get('goal')
+            
+            # 恢复对话历史到内存队列
+            chat_history = session_data.get('chat_history', [])
+            for msg in chat_history[-10:]:  # 只恢复最近10条消息
+                if 'role' in msg and 'content' in msg:
+                    # 添加到内存队列但不触发数据库保存
+                    queue_message = {
+                        "role": msg['role'],
+                        "content": msg['content'],
+                        "timestamp": time.time(),
+                        "type": msg.get('metadata', {}).get('type', 'normal')
+                    }
+                    self.real_chat_queue.put(queue_message)
+            
+            logger.info(f"Session restored from database: {session_key}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error restoring session from database: {e}")
+            return False
 
 
 # 全局后端实例

@@ -256,37 +256,21 @@ class TeachingFrontend:
                     with gr.Group(elem_classes="chat-container"):
                         components['real_chat_display'] = gr.HTML(self._get_initial_chat_html())
                         
-                        # # 测试和控制按钮
-                        # with gr.Row():
-                        #     components['test_chat_btn'] = gr.Button("🧪 测试对话显示", size="sm", variant="secondary")
-                        #     components['refresh_chat_btn'] = gr.Button("🔄 刷新对话", size="sm", variant="secondary")
-                        #     components['clear_chat_btn'] = gr.Button("🗑️清空对话", size="sm", variant="secondary")
-                        #     components['debug_btn'] = gr.Button("🔍 显示调试信息", size="sm", variant="secondary")
+                        # 测试和控制按钮
+                        with gr.Row():
+                            components['refresh_chat_btn'] = gr.Button("🔄 刷新对话", size="sm", variant="secondary")
+                            components['clear_chat_btn'] = gr.Button("🗑️清空对话", size="sm", variant="secondary")
+                            components['auto_toggle_btn'] = gr.Button("🔄 自动刷新: 启用", size="sm", variant="primary")
                         
-                        # # 调试信息显示区域
-                        # components['debug_info_display'] = gr.HTML("")
-                    
-                    # # 备用文本输入
-                    # with gr.Group():
-                    #     gr.Markdown("#### 📝 备用文本输入")
-                    #     with gr.Row():
-                    #         components['backup_input'] = gr.Textbox(
-                    #             label="",
-                    #             placeholder="如果语音对话不可用，可以在这里输入文字...",
-                    #             lines=2,
-                    #             scale=4
-                    #         )
-                    #         components['backup_send'] = gr.Button("发送", variant="secondary", scale=1)
-                
-                    #     # 备用对话显示
-                    #     components['backup_chat_display'] = gr.HTML("")
+                        # 调试信息显示区域
+                        components['debug_info_display'] = gr.HTML("")
                         
-                    #     # 快捷回复按钮
-                    #     with gr.Row():
-                    #         components['quick_reply_1'] = gr.Button("我听懂了", size="sm", variant="secondary")
-                    #         components['quick_reply_2'] = gr.Button("请再解释一遍", size="sm", variant="secondary")
-                    #         components['quick_reply_3'] = gr.Button("我有问题", size="sm", variant="secondary")
-                    #         components['quick_reply_4'] = gr.Button("下一个知识点", size="sm", variant="secondary")
+                        # 隐藏的状态组件用于自动刷新
+                        components['auto_refresh_state'] = gr.State(True)
+                        
+                        # 🎯 方案一：Timer定时器（现代化方案）
+                        components['refresh_timer'] = gr.Timer(value=2, active=True)  # 每2秒检查一次
+                  
         
         return teacher_chat_page, components, rtc_container
     
@@ -483,7 +467,8 @@ class TeachingFrontend:
                 **chat_components,
                 **states,
                 'course_selection_page': course_selection_page,
-                'teacher_chat_page': teacher_chat_page
+                'teacher_chat_page': teacher_chat_page,
+                'gradio_block': gradio_block  # 添加gradio_block引用
             }
             
             # 在Gradio上下文内绑定事件（延迟导入避免循环依赖）
