@@ -1,5 +1,5 @@
 """
-用户管理服务
+用户管理服务 - AI教学平台版本
 """
 import hashlib
 import secrets
@@ -11,17 +11,23 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from ..database.connection import db_manager
-from ..cache.redis_client import cache_manager, TeachingCacheKeys
+from ..cache.redis_client import cache_manager
+from ..cache import TeachingCacheKeys
 
 logger = logging.getLogger(__name__)
 
 
 class UserService:
-    """用户管理服务"""
+    """用户管理服务 - AI教学平台"""
     
     def __init__(self):
         self.cache = cache_manager
         self.session_ttl = 1800  # 30分钟会话过期
+        # 初始化缓存管理器
+        try:
+            self.cache.initialize()
+        except Exception as e:
+            logger.warning(f"Cache initialization failed: {e}")
     
     def _hash_password(self, password: str) -> str:
         """密码哈希"""
@@ -44,12 +50,13 @@ class UserService:
         """生成会话令牌"""
         return secrets.token_urlsafe(32)
     
-    def create_user(self, username: str, email: Optional[str] = None, password: Optional[str] = None, 
-                   preferences: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
-        """创建新用户"""
+    def create_student(self, username: str, password: str, email: Optional[str] = None, 
+                      grade_level: Optional[str] = None, parent_contact: Optional[str] = None,
+                      learning_preferences: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+        """创建学生用户"""
         try:
             # 延迟导入避免循环引用
-            from ..database.models import User
+            from ..database.models import User, UserRole
             
             with db_manager.get_session() as session:
                 # 检查用户名是否已存在
@@ -58,12 +65,16 @@ class UserService:
                     logger.warning(f"Username already exists: {username}")
                     return None
                 
-                # 创建新用户
+                # 创建学生用户
                 user = User(
                     username=username,
                     email=email,
-                    password_hash=self._hash_password(password) if password else None,
-                    preferences=preferences or {},
+                    password_hash=self._hash_password(password),
+                    role=UserRole.STUDENT,
+                    grade_level=grade_level,
+                    parent_contact=parent_contact,
+                    learning_preferences=learning_preferences or {},
+                    preferences={},
                     created_at=datetime.now()
                 )
                 
@@ -71,15 +82,77 @@ class UserService:
                 session.commit()
                 session.refresh(user)
                 
-                logger.info(f"User created: {username} (ID: {user.id})")
+                logger.info(f"Student created: {username} (ID: {user.id})")
                 return user.to_dict()
                 
         except IntegrityError as e:
-            logger.error(f"User creation failed - integrity error: {e}")
+            logger.error(f"Student creation failed - integrity error: {e}")
             return None
         except Exception as e:
-            logger.error(f"User creation failed: {e}")
+            logger.error(f"Student creation failed: {e}")
             return None
+    
+    def create_admin(self, username: str, password: str, email: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """创建管理员用户（需要超级管理员权限）"""
+        try:
+            from ..database.models import User, UserRole
+            
+            with db_manager.get_session() as session:
+                existing_user = session.query(User).filter(User.username == username).first()
+                if existing_user:
+                    logger.warning(f"Admin username already exists: {username}")
+                    return None
+                
+                user = User(
+                    username=username,
+                    email=email,
+                    password_hash=self._hash_password(password),
+                    role=UserRole.ADMIN,
+                    preferences={},
+                    created_at=datetime.now()
+                )
+                
+                session.add(user)
+                session.commit()
+                session.refresh(user)
+                
+                logger.info(f"Admin created: {username} (ID: {user.id})")
+                return user.to_dict()
+                
+        except Exception as e:
+            logger.error(f"Admin creation failed: {e}")
+            return None
+    
+    def create_user(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """通用用户创建方法，兼容启动脚本"""
+        try:
+            role = user_data.get("role", "student")
+            
+            if role == "admin":
+                result = self.create_admin(
+                    username=user_data["username"],
+                    password=user_data["password"],
+                    email=user_data.get("email")
+                )
+            else:
+                # 默认创建学生用户
+                result = self.create_student(
+                    username=user_data["username"],
+                    password=user_data["password"],
+                    email=user_data.get("email"),
+                    grade_level=user_data.get("grade_level"),
+                    parent_contact=user_data.get("parent_contact"),
+                    learning_preferences=user_data.get("learning_preferences")
+                )
+            
+            if result:
+                return {"success": True, "user": result}
+            else:
+                return {"success": False, "message": "用户创建失败"}
+                
+        except Exception as e:
+            logger.error(f"Create user error: {e}")
+            return {"success": False, "message": str(e)}
     
     def authenticate_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
         """用户认证"""
@@ -115,6 +188,7 @@ class UserService:
                     {
                         "user_id": user.id,
                         "username": user.username,
+                        "role": user.role.value,
                         "login_time": datetime.now().isoformat(),
                         "preferences": user.preferences
                     },
@@ -124,12 +198,94 @@ class UserService:
                 user_data = user.to_dict()
                 user_data["session_token"] = session_token
                 
-                logger.info(f"User authenticated: {username}")
+                logger.info(f"User authenticated: {username} (Role: {user.role.value})")
                 return user_data
                 
         except Exception as e:
             logger.error(f"Authentication error: {e}")
             return None
+    
+    def check_permission(self, session_token: str, required_role: str) -> bool:
+        """检查用户权限"""
+        try:
+            session_data = self.cache.get(TeachingCacheKeys.USER_SESSION, session_token)
+            if not session_data:
+                return False
+            
+            user_role = session_data.get('role')
+            
+            # 权限层级：admin > parent > student
+            role_hierarchy = {
+                'student': 1,
+                'parent': 2,
+                'admin': 3
+            }
+            
+            user_level = role_hierarchy.get(user_role, 0)
+            required_level = role_hierarchy.get(required_role, 999)
+            
+            return user_level >= required_level
+            
+        except Exception as e:
+            logger.error(f"Permission check error: {e}")
+            return False
+    
+    def get_students_list(self, limit: int = 50, offset: int = 0, grade_level: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取学生列表（管理员功能）"""
+        try:
+            from ..database.models import User, UserRole
+            
+            with db_manager.get_session() as session:
+                query = session.query(User).filter(
+                    User.role == UserRole.STUDENT,
+                    User.is_active == True
+                )
+                
+                if grade_level:
+                    query = query.filter(User.grade_level == grade_level)
+                
+                students = query.offset(offset).limit(limit).all()
+                
+                return [student.to_dict() for student in students]
+                
+        except Exception as e:
+            logger.error(f"Get students list error: {e}")
+            return []
+    
+    def update_student_profile(self, user_id: int, grade_level: Optional[str] = None,
+                             parent_contact: Optional[str] = None,
+                             learning_preferences: Optional[Dict] = None) -> bool:
+        """更新学生档案"""
+        try:
+            from ..database.models import User, UserRole
+            
+            with db_manager.get_session() as session:
+                user = session.query(User).filter(
+                    User.id == user_id,
+                    User.role == UserRole.STUDENT
+                ).first()
+                
+                if not user:
+                    return False
+                
+                if grade_level is not None:
+                    user.grade_level = grade_level
+                if parent_contact is not None:
+                    user.parent_contact = parent_contact
+                if learning_preferences is not None:
+                    user.learning_preferences = learning_preferences
+                
+                session.commit()
+                
+                # 清理缓存
+                self.cache.delete(TeachingCacheKeys.USER_PROFILE, str(user_id))
+                
+                logger.info(f"Student profile updated: {user_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Update student profile error: {e}")
+            return False
     
     def get_user_by_session(self, session_token: str) -> Optional[Dict[str, Any]]:
         """通过会话令牌获取用户信息"""

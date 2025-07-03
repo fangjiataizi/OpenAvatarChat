@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from typing import Generator, Optional
 import logging
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -117,7 +117,7 @@ class DatabaseManager:
         """数据库健康检查"""
         try:
             with self.get_session() as session:
-                session.execute("SELECT 1")
+                session.execute(text("SELECT 1"))
                 return True
         except Exception as e:
             logger.error(f"Database health check failed: {e}")

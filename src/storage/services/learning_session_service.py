@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from ..database.connection import db_manager
-from ..cache.redis_client import cache_manager, TeachingCacheKeys
+from ..cache.redis_client import cache_manager
+from ..cache import TeachingCacheKeys
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,11 @@ class LearningSessionService:
     
     def __init__(self):
         self.cache = cache_manager
+        # 初始化缓存管理器
+        try:
+            self.cache.initialize()
+        except Exception as e:
+            logger.warning(f"Cache initialization failed: {e}")
     
     def create_session(self, user_id: int, course_name: str, difficulty: str, goal: str, 
                       course_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -132,13 +138,13 @@ class LearningSessionService:
                     **(metadata or {})
                 })
                 
-                # 更新统计信息
+                # 更新统计信息 - 修复JSON列更新问题
+                metadata = dict(learning_session.session_metadata or {})
                 if message_type == "proactive":
-                    learning_session.session_metadata["ai_proactive_count"] = \
-                        learning_session.session_metadata.get("ai_proactive_count", 0) + 1
+                    metadata["ai_proactive_count"] = metadata.get("ai_proactive_count", 0) + 1
                 elif role == "human":
-                    learning_session.session_metadata["user_response_count"] = \
-                        learning_session.session_metadata.get("user_response_count", 0) + 1
+                    metadata["user_response_count"] = metadata.get("user_response_count", 0) + 1
+                learning_session.session_metadata = metadata
                 
                 session.commit()
                 
