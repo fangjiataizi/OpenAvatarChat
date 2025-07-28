@@ -1,0 +1,146 @@
+# AI在线教学平台配置文件 - 统一版本
+default:
+  logger:
+    log_level: "INFO"
+  service:
+    host: "0.0.0.0"
+    port: 8443  # HTTPS端口
+    # SSL配置
+    cert_file: "ssl_certs/cert.pem"
+    cert_key: "ssl_certs/key.pem"
+  
+  # 存储配置
+  storage:
+    database:
+      type: "postgresql"
+      url: "postgresql://teaching_admin:secure_password_123@localhost:5432/teaching_platform"
+      echo: false
+      pool_size: 10
+      max_overflow: 20
+    
+    cache:
+      type: "redis"
+      host: "localhost"
+      port: 6379
+      db: 0
+      password: null
+      max_connections: 50
+    
+    minio:
+      endpoint: "localhost:9000"
+      access_key: "teaching_admin"
+      secret_key: "secure_password_123"
+      secure: false
+      region: "us-east-1"
+  chat_engine:
+    model_root: "models"
+    handler_search_path:
+      - "src/handlers"
+    handler_configs:
+      # RTC客户端
+      RtcClient:
+        module: client/rtc_client/client_handler_rtc
+        concurrent_limit: 1
+        turn_config:
+          urls:
+            - "stun:47.92.248.48:3478"
+            - "turn:47.92.248.48:3478"
+            - "stun:stun.l.google.com:19302"
+          username: "username"
+          credential: "password"
+      
+      # VAD语音检测
+      SileroVad:
+        module: vad/silerovad/vad_handler_silero
+        speaking_threshold: 0.5
+        start_delay: 2048
+        end_delay: 5000
+        buffer_look_back: 5000
+        speech_padding: 512
+      
+      # 语音识别
+      SenseVoice:
+        enabled: True
+        module: asr/sensevoice/asr_handler_sensevoice
+        model_name: "iic/SenseVoiceSmall"
+      
+      # TTS语音合成
+      Edge_TTS:
+        enabled: True
+        module: tts/edgetts/tts_handler_edgetts
+        voice: "zh-CN-XiaoxiaoNeural"
+      
+      # LLM大模型
+      LLM_Bailian:
+        enabled: True
+        module: llm/openai_compatible/llm_handler_openai_compatible
+        model_name: "qwen-vl-plus"
+        enable_video_input: True
+        system_prompt: "你是一位专业的AI雅思英语教师，名叫小慧老师。请用亲切、耐心的语气进行教学，每次回答控制在2-3句话内。注重启发式教学，多用提问引导学生思考。针对雅思考试，请提供实用的学习技巧和应试策略。支持主动教学功能。"
+        api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        api_key: "sk-a7ec873e0a04461f8ce6c74ea815fa28"
+      
+      # LiteAvatar数字人
+      AvatarLiteAvatar:
+        module: avatar/liteavatar/avatar_handler_liteavatar
+        avatar_name: "sample_data"
+        fps: 25
+        debug: false
+        enable_fast_mode: true
+        use_gpu: false
+
+# 教学特定配置
+teaching:
+  # 课程设置
+  courses:
+    - name: "雅思 - 基础语法"
+      description: "英语语法基础，时态、句型、语态等"
+      difficulty_levels: ["初级", "中级", "高级"]
+      
+    - name: "雅思 - 词汇记忆"
+      description: "雅思核心词汇、记忆技巧和应用"
+      difficulty_levels: ["初级", "中级", "高级"]
+      
+    - name: "雅思 - 写作技巧"
+      description: "雅思写作Task1和Task2技巧训练"
+      difficulty_levels: ["初级", "中级", "高级"]
+      
+    - name: "雅思 - 口语练习"
+      description: "雅思口语Part1-3练习和技巧"
+      difficulty_levels: ["初级", "中级", "高级"]
+
+  # 教师设置
+  teacher:
+    name: "小慧老师"
+    avatar: "default"
+    personality: "亲切、耐心、专业"
+    
+  # 学习会话设置
+  session:
+    max_duration: 3600  # 最大会话时长(秒)
+    auto_save: true     # 自动保存学习记录
+    
+  # 主动教学设置
+  proactive_teaching:
+    enabled: true
+    greeting_delay: 3.0      # 问候延迟(秒)
+    teaching_start_delay: 15.0  # 开始教学延迟(秒)
+    content_interval_min: 30.0  # 内容发送最小间隔(秒)
+    content_interval_max: 45.0  # 内容发送最大间隔(秒)
+    
+  # 日志监控设置
+  monitoring:
+    log_file: "logs/teaching_platform.log"
+    update_interval: 2   # 对话更新间隔(秒)
+    enable_real_time: true  # 启用实时对话监控
+
+# 环境变量配置
+environment:
+  # 必需的环境变量
+  required_vars:
+    - "DASHSCOPE_API_KEY"
+    
+  # 可选的环境变量  
+  optional_vars:
+    - "HF_TOKEN"
+    - "OPENAI_API_KEY" 

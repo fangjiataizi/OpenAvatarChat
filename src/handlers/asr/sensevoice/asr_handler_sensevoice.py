@@ -141,6 +141,10 @@ class HandlerASR(HandlerBase, ABC):
         logger.info(res)
         context.output_audios.clear()
         output_text = re.sub(r"<\|.*?\|>", "", res[0]['text'])
+        
+        # 简单记录ASR识别结果
+        if output_text and len(output_text.strip()) > 0:
+            logger.info(f"🧑‍🎓 ASR Recognized: {output_text}")
         if len(output_text) == 0:
             # 如果 ASR 识别结果为空，则需要重新开启vad
             context.shared_states.enable_vad = True

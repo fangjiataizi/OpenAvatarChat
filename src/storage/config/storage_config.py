@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 
 class DatabaseConfig(BaseModel):
     """数据库配置"""
-    type: str = Field(default="sqlite")
-    url: str = Field(default="sqlite:///./teaching_platform.db")
+    type: str = Field(default="postgresql")
+    url: str = Field(default="postgresql://teaching_admin:secure_password_123@localhost:5432/teaching_platform")
     echo: bool = Field(default=False)
     pool_size: int = Field(default=10)
     max_overflow: int = Field(default=20)
@@ -63,8 +63,8 @@ class StorageConfig(BaseModel):
         """从环境变量创建配置"""
         return cls(
             database=DatabaseConfig(
-                type=os.getenv("DB_TYPE", "sqlite"),
-                url=os.getenv("DB_URL", "sqlite:///./teaching_platform.db"),
+                type=os.getenv("DB_TYPE", "postgresql"),
+                url=os.getenv("DB_URL", "postgresql://teaching_admin:secure_password_123@localhost:5432/teaching_platform"),
                 echo=os.getenv("DB_ECHO", "false").lower() == "true"
             ),
             cache=CacheConfig(

@@ -1,12 +1,265 @@
-<h1 style='text-align: center; margin-bottom: 1rem'> Open Avatar Chat </h1>
+# AI在线教学平台 - 统一版本
 
-<p align="center">
-<strong>English | <a href="readme_cn.md">中文</a></strong>
-</p>
+基于OpenAvatarChat项目开发的1v1数字人教学系统，整合了所有核心功能。
 
-<p align="center">
-<strong>A modular interactive digital human conversation implementation that runs full-featured on a single PC.</strong>
-</p>
+## 🌟 功能特色
+
+### 🤖 AI数字人教学
+- **智能个性化教学**: 基于Qwen-VL大模型的专业AI教师
+- **实时音视频交互**: WebRTC技术支持高质量音视频通话
+- **数字人形象**: LiteAvatar技术呈现逼真的AI教师形象
+
+### 🎯 主动教学系统
+- **立即问候**: 开始学习后AI教师立即个性化问候
+- **主动教学**: 15秒后开始主动教学内容讲授
+- **定期推送**: 每30-45秒自动发送新的教学内容
+- **智能互动**: 支持随时语音和文字互动
+
+### 📚 丰富教学内容
+- **雅思语法**: 时态、语态、句型结构等基础语法
+- **雅思词汇**: 核心词汇、记忆技巧和应用练习
+- **雅思写作**: Task1图表作文和Task2议论文技巧
+- **雅思口语**: Part1-3全面口语练习和应试策略
+
+### 💾 数据存储与管理
+- **PostgreSQL**: 用户数据和学习记录持久化存储
+- **Redis**: 会话缓存和实时数据管理
+- **学习追踪**: 完整的学习过程记录和分析
+
+## 🚀 快速开始
+
+### 环境要求
+- Python 3.8+
+- PostgreSQL 12+
+- Redis 6+
+- Ubuntu/Linux 系统
+
+### 安装依赖
+```bash
+# 安装Python依赖
+pip install -r requirements.txt
+
+# 启动数据库服务
+sudo systemctl start postgresql
+sudo systemctl start redis-server
+```
+
+### 配置环境变量
+```bash
+# 设置API密钥
+export DASHSCOPE_API_KEY="your_dashscope_api_key"
+
+# 可选：设置其他环境变量
+export CUDA_VISIBLE_DEVICES="0"
+```
+
+### 启动服务
+```bash
+# 直接启动
+./start.sh start
+
+# 使用指定配置启动
+./start.sh start config/teaching.yaml
+
+# 指定主机和端口
+./start.sh start config/teaching.yaml 0.0.0.0 8443
+```
+
+### 访问平台
+打开浏览器访问: `https://localhost:8443`
+
+## 📁 项目结构
+
+```
+OpenAvatarChat/
+├── src/
+│   └── demo.py                 # 主启动文件
+├── teaching_backend.py         # 后端业务逻辑（含主动教学）
+├── teaching_frontend.py        # 前端界面
+├── teaching_api.py            # API接口层
+├── config/
+│   ├── teaching.yaml          # 主配置文件
+│   └── teaching_with_storage.yaml
+├── logs/                      # 日志目录
+├── ssl_certs/                 # SSL证书目录
+├── start.sh                   # 启动脚本
+└── README.md                  # 说明文档
+```
+
+## ⚙️ 配置说明
+
+### 主配置文件: `config/teaching.yaml`
+- **服务配置**: 主机、端口、SSL证书
+- **存储配置**: PostgreSQL、Redis、MinIO
+- **AI模型配置**: LLM、TTS、Avatar处理器
+- **教学系统配置**: 主动教学参数、课程设置
+
+### 主要配置项
+```yaml
+# 主动教学设置
+proactive_teaching:
+  enabled: true
+  greeting_delay: 3.0          # 问候延迟(秒)
+  teaching_start_delay: 15.0   # 开始教学延迟(秒)
+  content_interval_min: 30.0   # 内容间隔最小值(秒)
+  content_interval_max: 45.0   # 内容间隔最大值(秒)
+```
+
+## 🎓 使用指南
+
+### 1. 课程选择
+- 在首页选择感兴趣的课程（语法、词汇、写作、口语）
+- 选择适合的难度等级（初级、中级、高级）
+- 可选择性填写学习目标
+
+### 2. 开始学习
+- 点击"🚀 开始学习"按钮
+- AI教师会立即进行个性化问候
+- 15秒后开始主动教学内容讲授
+
+### 3. 互动学习
+- 通过左侧视频区域进行语音对话
+- 右侧实时显示对话内容
+- AI教师会每30-45秒主动发送新的教学内容
+
+### 4. 学习管理
+- 系统自动保存学习记录
+- 支持随时返回课程选择重新开始
+- 提供学习统计和进度追踪
+
+## 🔧 管理命令
+
+```bash
+# 启动服务
+./start.sh start
+
+# 停止服务
+./start.sh stop
+
+# 重启服务
+./start.sh restart
+
+# 查看日志
+tail -f logs/teaching_platform.log
+
+# 健康检查
+curl https://localhost:8443/health
+```
+
+## 🛠️ 技术架构
+
+### 前端技术
+- **Gradio**: Web界面框架
+- **HTML/CSS/JavaScript**: 前端交互
+- **WebRTC**: 实时音视频通信
+
+### 后端技术
+- **FastAPI**: Web服务框架
+- **OpenAvatarChat**: 数字人引擎
+- **Qwen-VL**: 大语言模型
+- **LiteAvatar**: 数字人渲染
+
+### 数据存储
+- **PostgreSQL**: 关系型数据库
+- **Redis**: 内存缓存
+- **本地文件**: 日志和临时文件
+
+## 🔒 安全配置
+
+### SSL证书
+系统会自动创建自签名SSL证书，生产环境建议使用正式证书：
+```bash
+# 替换SSL证书
+cp your_cert.pem ssl_certs/cert.pem
+cp your_key.pem ssl_certs/key.pem
+```
+
+### 环境变量
+敏感信息通过环境变量配置，不在代码中硬编码：
+- `DASHSCOPE_API_KEY`: 阿里云API密钥
+- `DATABASE_PASSWORD`: 数据库密码
+
+## 📊 监控和日志
+
+### 日志文件
+- **主日志**: `logs/teaching_platform.log`
+- **错误日志**: 同主日志文件
+- **访问日志**: Gradio自动记录
+
+### 健康检查
+- **端点**: `GET /health`
+- **响应**: 系统状态和功能列表
+
+## 🤝 开发指南
+
+### 代码结构
+- **teaching_backend.py**: 核心业务逻辑，包含主动教学系统
+- **teaching_frontend.py**: 用户界面定义和样式
+- **teaching_api.py**: 前后端连接的API层
+
+### 主要功能模块
+1. **课程管理**: 课程选择、难度设置、目标设定
+2. **对话处理**: 实时语音识别、AI回复生成
+3. **主动教学**: 定时内容推送、教学流程控制
+4. **数据存储**: 学习记录、会话管理、统计分析
+
+## 🐛 故障排除
+
+### 常见问题
+
+1. **启动失败**
+   - 检查Python环境和依赖
+   - 确认数据库服务正常运行
+   - 查看日志文件了解具体错误
+
+2. **AI功能不可用**
+   - 确认`DASHSCOPE_API_KEY`环境变量已设置
+   - 检查网络连接和API配额
+
+3. **数字人无法显示**
+   - 确认WebRTC权限已开启
+   - 检查浏览器兼容性
+   - 查看控制台错误信息
+
+4. **端口被占用**
+   - 使用`./start.sh stop`停止所有相关进程
+   - 或修改配置文件中的端口设置
+
+### 日志分析
+```bash
+# 查看实时日志
+tail -f logs/teaching_platform.log
+
+# 搜索错误信息
+grep "ERROR" logs/teaching_platform.log
+
+# 查看AI对话日志
+grep "current sentence" logs/teaching_platform.log
+```
+
+## 📝 更新日志
+
+### v1.0.0 (当前版本)
+- ✅ 统一代码架构，整合所有功能
+- ✅ 实现主动教学系统
+- ✅ 优化AI数字人交互体验
+- ✅ 完善数据存储和会话管理
+- ✅ 简化部署和配置流程
+
+## 📞 技术支持
+
+如有问题或建议，请：
+1. 查看本文档的故障排除部分
+2. 检查日志文件获取详细错误信息
+3. 确认环境配置和依赖版本
+
+---
+
+**基于OpenAvatarChat项目开发** | **专注于AI教育技术创新**
+
+---
+
+# Open Avatar Chat - Original Documentation
 
 <p align="center" style="display: flex; flex-direction: row; justify-content: center">
  🤗 <a href="https://huggingface.co/spaces/HumanAIGC-Engineering-Team/open-avatar-chat">Demo</a>&nbsp&nbsp|&nbsp&nbsp<img alt="Static Badge" style="height: 10px;" src="./assets/images/modelscope_logo.png"> <a href="https://www.modelscope.cn/studios/HumanAIGC-Engineering/open-avatar-chat">Demo</a>&nbsp&nbsp|&nbsp&nbsp💬 <a href="https://github.com/HumanAIGC-Engineering/OpenAvatarChat/blob/main/assets/images/community_wechat.png">WeChat</a>

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-AI在线教学平台 - 前端界面
+AI在线教学平台 - 统一前端界面
 负责Gradio界面定义、用户交互和UI展示
+整合了用户登录、课程选择、教师对话、实时通信等功能
 """
 
 import gradio as gr
@@ -137,19 +138,191 @@ class TeachingFrontend:
             left: 20px;
             z-index: 1000;
         }
+        
+        /* 登录页面样式 */
+        .login-container {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 30px;
+            border: 2px solid #e1e5e9;
+            border-radius: 15px;
+            background: white;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 25px;
+            color: #333;
+        }
+        .login-form {
+            padding: 20px 0;
+        }
+        .user-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
         """
+    
+    def create_login_page(self) -> Tuple[gr.Group, Dict[str, Any]]:
+        """创建用户登录页面"""
+        components = {}
+        
+        with gr.Group(visible=True) as login_page:
+            # 登录页面标题
+            with gr.Row():
+                gr.HTML("""
+                <div class="teaching-header">
+                    <h1>🎓 AI在线教学平台</h1>
+                    <p>请登录开始您的个性化学习之旅</p>
+                </div>
+                """)
+            
+            # 登录表单区域
+            with gr.Row():
+                with gr.Column(scale=1):
+                    pass  # 左侧空白
+                with gr.Column(scale=2):
+                    with gr.Group():
+                        gr.HTML('<div class="login-header"><h2>登录</h2></div>')
+                        
+                        # 登录表单
+                        with gr.Column():
+                            components['username'] = gr.Textbox(
+                                label="用户名",
+                                placeholder="请输入用户名",
+                                elem_classes=["login-form"]
+                            )
+                            components['password'] = gr.Textbox(
+                                label="密码",
+                                placeholder="请输入密码",
+                                type="password",
+                                elem_classes=["login-form"]
+                            )
+                            
+                            # 登录和注册按钮
+                            with gr.Row():
+                                components['login_btn'] = gr.Button(
+                                    "🚀 登录",
+                                    variant="primary",
+                                    size="lg"
+                                )
+                                components['show_register_btn'] = gr.Button(
+                                    "📝 注册新用户",
+                                    variant="secondary",
+                                    size="lg"
+                                )
+                            
+                            # 登录状态消息
+                            components['login_status'] = gr.Markdown(
+                                "",
+                                visible=True
+                            )
+                with gr.Column(scale=1):
+                    pass  # 右侧空白
+            
+            # 注册表单区域（默认隐藏）
+            with gr.Row(visible=False) as register_section:
+                with gr.Column(scale=1):
+                    pass  # 左侧空白
+                with gr.Column(scale=2):
+                    with gr.Group():
+                        gr.HTML('<div class="login-header"><h2>用户注册</h2></div>')
+                        
+                        with gr.Column():
+                            components['reg_username'] = gr.Textbox(
+                                label="用户名",
+                                placeholder="3-20个字符",
+                                elem_classes=["login-form"]
+                            )
+                            components['reg_email'] = gr.Textbox(
+                                label="邮箱 (可选)",
+                                placeholder="用于找回密码",
+                                elem_classes=["login-form"]
+                            )
+                            components['reg_password'] = gr.Textbox(
+                                label="密码",
+                                placeholder="至少6位字符",
+                                type="password",
+                                elem_classes=["login-form"]
+                            )
+                            components['reg_confirm_password'] = gr.Textbox(
+                                label="确认密码",
+                                placeholder="请再次输入密码",
+                                type="password",
+                                elem_classes=["login-form"]
+                            )
+                            components['reg_grade'] = gr.Dropdown(
+                                label="年级 (可选)",
+                                choices=["小学", "初中", "高中", "大学", "成人"],
+                                elem_classes=["login-form"]
+                            )
+                            
+                            # 注册和返回按钮
+                            with gr.Row():
+                                components['register_btn'] = gr.Button(
+                                    "✅ 注册",
+                                    variant="primary",
+                                    size="lg"
+                                )
+                                components['back_to_login_btn'] = gr.Button(
+                                    "← 返回登录",
+                                    variant="secondary",
+                                    size="lg"
+                                )
+                            
+                            # 注册状态消息
+                            components['register_status'] = gr.Markdown(
+                                "",
+                                visible=False
+                            )
+                with gr.Column(scale=1):
+                    pass  # 右侧空白
+            
+            components['register_section'] = register_section
+            
+            # 演示账户提示
+            with gr.Row():
+                with gr.Column():
+                    gr.HTML("""
+                    <div style="text-align: center; padding: 20px; color: #666; border-top: 1px solid #eee; margin-top: 30px;">
+                        <h4>演示账户</h4>
+                        <p>学生账户: <code>student1</code> / <code>123456</code></p>
+                        <p>管理员: <code>admin</code> / <code>admin123</code></p>
+                    </div>
+                    """)
+        
+        return login_page, components
     
     def create_course_selection_page(self) -> Tuple[gr.Group, Dict[str, Any]]:
         """创建课程选择页面"""
         components = {}
         
-        with gr.Group(visible=True) as course_selection_page:
+        with gr.Group(visible=False) as course_selection_page:
+            # 用户信息和登出
+            with gr.Row():
+                with gr.Column(scale=3):
+                    components['user_info'] = gr.HTML("""
+                    <div class="user-info">
+                        <span>👤 用户: 未登录</span>
+                    </div>
+                    """)
+                with gr.Column(scale=1):
+                    components['logout_btn'] = gr.Button(
+                        "🚪 登出",
+                        variant="secondary",
+                        size="sm"
+                    )
+            
             # 页面标题
             with gr.Row():
                 gr.HTML("""
                 <div class="teaching-header">
                     <h1>🎓 AI在线教学平台</h1>
-                    <p>与专业AI数学教师进行1v1互动学习</p>
+                    <p>与专业AI雅思教师进行1v1互动学习</p>
                 </div>
                 """)
             
@@ -218,6 +391,17 @@ class TeachingFrontend:
                                 <p><strong>个性化</strong><br/>因材施教</p>
                             </div>
                         </div>
+                        <div style="margin-top: 30px; padding: 20px; background: #fff3cd; border-radius: 8px;">
+                            <h4>🌟 主动教学特色</h4>
+                            <p>AI教师会在您开始学习后主动进行教学：</p>
+                            <ul style="text-align: left; margin: 10px 0;">
+                                <li>✅ 开始学习后立即个性化问候</li>
+                                <li>✅ 15秒后开始主动教学内容讲授</li>
+                                <li>✅ 每30-45秒自动发送新的教学内容</li>
+                                <li>✅ 丰富的雅思教学内容库</li>
+                                <li>✅ 支持随时语音和文字互动</li>
+                            </ul>
+                        </div>
                     </div>
                     """)
         
@@ -268,7 +452,7 @@ class TeachingFrontend:
                         # 隐藏的状态组件用于自动刷新
                         components['auto_refresh_state'] = gr.State(True)
                         
-                        # 🎯 方案一：Timer定时器（现代化方案）
+                        # Timer定时器
                         components['refresh_timer'] = gr.Timer(value=2, active=True)  # 每2秒检查一次
                   
         
@@ -345,7 +529,8 @@ class TeachingFrontend:
         1. 点击摄像头图标开始视频对话<br/>
         2. 允许摄像头和麦克风权限<br/>
         3. 可以语音提问或使用右侧文字对话<br/>
-        4. <strong>语音对话会自动显示在右侧对话区域</strong>
+        4. <strong>语音对话会自动显示在右侧对话区域</strong><br/>
+        5. <strong>AI教师会主动进行教学讲解</strong>
         </div>'''
     
     def _get_initial_chat_html(self) -> str:
@@ -356,7 +541,8 @@ class TeachingFrontend:
                 <p>🎯 开始您的学习之旅</p>
                 <p>AI教师将根据您选择的课程进行个性化教学</p>
                 <p style="margin-top: 15px; font-size: 12px; color: #999;">
-                提示：通过左侧视频进行语音对话，对话内容会实时显示在这里
+                提示：通过左侧视频进行语音对话，对话内容会实时显示在这里<br/>
+                AI教师会在开始学习后主动进行教学讲解
                 </p>
             </div>
         </div>
@@ -397,6 +583,15 @@ class TeachingFrontend:
                     </div>
                 </div>
                 '''
+            elif msg['role'] == 'system':
+                chat_html += f'''
+                <div style="margin-bottom: 15px;">
+                    <div style="background: #fff3e0; padding: 12px; border-radius: 12px; border-left: 4px solid #ff9800;">
+                        <strong>💡 系统提示:</strong><br/>
+                        {msg['content']}
+                    </div>
+                </div>
+                '''
         
         return f'''
         <div id="real-chat-container" style="height: 400px; overflow-y: auto; padding: 15px; background: #f8f9fa; border-radius: 8px;">
@@ -421,7 +616,6 @@ class TeachingFrontend:
                 chat_html += f'<div class="message-teacher"><strong>👩‍🏫 小慧老师:</strong><br/>{msg["content"]}</div>'
             elif msg["role"] == "student":
                 chat_html += f'<div class="message-student"><strong>🧑‍🎓 您:</strong><br/>{msg["content"]}</div>'
-            # 跳过system消息的显示
         return chat_html
     
     def create_course_info_html(self, course: str, difficulty: str, goal: str) -> str:
@@ -432,6 +626,9 @@ class TeachingFrontend:
             <div style="display: flex; justify-content: space-between; margin-top: 10px;">
                 <span>📊 难度: {difficulty}</span>
                 <span>🎯 目标: {goal or '系统推荐'}</span>
+            </div>
+            <div style="margin-top: 10px; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; font-size: 12px;">
+                💡 <strong>主动教学提示：</strong>AI教师会在您开始学习后主动进行个性化教学，包括问候、知识讲解和练习指导
             </div>
         </div>
         """
@@ -455,6 +652,9 @@ class TeachingFrontend:
             # 创建状态组件
             states = self.create_state_components()
             
+            # 创建登录页面
+            login_page, login_components = self.create_login_page()
+            
             # 创建课程选择页面
             course_selection_page, course_components = self.create_course_selection_page()
             
@@ -463,15 +663,17 @@ class TeachingFrontend:
             
             # 合并所有组件
             all_components = {
+                **login_components,
                 **course_components,
                 **chat_components,
                 **states,
+                'login_page': login_page,
                 'course_selection_page': course_selection_page,
                 'teacher_chat_page': teacher_chat_page,
-                'gradio_block': gradio_block  # 添加gradio_block引用
+                'gradio_block': gradio_block
             }
             
-            # 在Gradio上下文内绑定事件（延迟导入避免循环依赖）
+            # 在Gradio上下文内绑定事件
             self._bind_events_in_context(all_components)
         
         return gradio_block, all_components, rtc_container
@@ -479,9 +681,9 @@ class TeachingFrontend:
     def _bind_events_in_context(self, components: Dict[str, Any]):
         """在Gradio上下文内绑定事件"""
         # 延迟导入避免循环依赖
-        from src.api.teaching_api import teaching_api
+        from teaching_api import teaching_api
         teaching_api.bind_events(components)
 
 
 # 全局前端实例
-teaching_frontend = TeachingFrontend() 
+teaching_frontend = TeachingFrontend()

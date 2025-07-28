@@ -25,7 +25,7 @@ if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 
 # 导入分离后的模块
-from src.api.teaching_api import teaching_api
+from teaching_api import teaching_api
 
 
 def parse_args():
@@ -33,7 +33,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="AI在线教学平台")
     parser.add_argument("--host", type=str, help="服务主机地址")
     parser.add_argument("--port", type=int, help="服务端口")
-    parser.add_argument("--config", type=str, default="config/teaching_basic.yaml", help="配置文件路径")
+    parser.add_argument("--config", type=str, default="config/teaching.yaml", help="配置文件路径")
     parser.add_argument("--env", type=str, default="default", help="配置环境")
     return parser.parse_args()
 
