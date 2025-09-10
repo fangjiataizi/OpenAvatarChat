@@ -72,8 +72,11 @@ class Tts2FaceOutputHandler(AvatarOutputHandler):
     def on_video(self, video_result: VideoResult):
         self._video_producer_counter.add()
         video_frame = video_result.video_frame
-        data = video_frame.to_ndarray(format="bgr24")
-        self.video_output_queue.put_nowait(data)
+        # Convert BGR to RGB for WebRTC compatibility
+        bgr_data = video_frame.to_ndarray(format="bgr24")
+        # Convert BGR to RGB by reversing the color channel order
+        rgb_data = bgr_data[:, :, ::-1]
+        self.video_output_queue.put_nowait(rgb_data)
 
     def on_avatar_status_change(self, speech_id, avatar_status: AvatarStatus):
         logger.info(f"Avatar status changed: {speech_id} {avatar_status}")
@@ -124,7 +127,7 @@ class AvatarProcessorWrapper:
                 avatar_name=config.avatar_name,
                 debug=config.debug,
                 enable_fast_mode=config.enable_fast_mode,
-                use_gpu=config.use_gpu
+                use_gpu=False  # 强制使用CPU模式避免GPU依赖问题
             )
         )
         # start event input loop

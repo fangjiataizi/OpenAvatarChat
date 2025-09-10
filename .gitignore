@@ -38,3 +38,16 @@ dump_avatar_audio.pcm
 exp/
 uv.lock
 logs/
+
+# News Broadcast 临时文件
+*.pid
+*.log
+test_*.py
+service_*.log
+__pycache__/
+*.pyc
+*.pyo
+output/news_broadcast/podcasts/*.wav
+output/news_broadcast/videos/*.mp4
+output/news_videos/
+tmp/

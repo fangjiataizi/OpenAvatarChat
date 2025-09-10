@@ -1,0 +1,235 @@
+# 数字人播报新闻服务配置文件
+default:
+  logger:
+    log_level: "INFO"
+
+  service:
+    host: "0.0.0.0"
+    port: 8444  # HTTPS端口，与教学平台不同
+    cert_file: "ssl_certs/cert.pem"
+    cert_key: "ssl_certs/key.pem"
+
+  # 新闻播报专用存储配置
+  storage:
+    database:
+      type: "postgresql"
+      url: "postgresql://news_admin:secure_password_123@localhost:5432/news_broadcast_platform"
+      echo: false
+      pool_size: 10
+      max_overflow: 20
+
+    cache:
+      type: "redis"
+      host: "localhost"
+      port: 6379
+      db: 1  # 与教学平台使用不同数据库
+      password: null
+      max_connections: 50
+
+  # 新闻播报引擎配置
+  news_engine:
+    model_root: "models"
+    handler_search_path:
+      - "src/handlers"
+
+    # 新闻脚本生成器
+    handler_configs:
+      NewsScriptGenerator:
+        module: news/script_generator/news_script_handler
+        enabled: true
+        llm_options:
+          - name: "qwen-plus"
+            provider: "bailian"
+            model_name: "qwen-plus"
+            system_prompt: "你是一位专业的新闻播报员脚本撰写专家。请根据用户提供的新闻内容，撰写适合电视播报的新闻脚本。要求：语言正式、客观、简洁明了，适合口播，包含适当的停顿提示。"
+            api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            api_key: "${DASHSCOPE_API_KEY}"
+          - name: "qwen-max"
+            provider: "bailian"
+            model_name: "qwen-max"
+            system_prompt: "你是一位资深新闻主播。请根据提供的新闻素材，创作高质量的新闻播报脚本。要求：用词精准、生动，节奏感强，适合电视新闻播报。"
+            api_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            api_key: "${DASHSCOPE_API_KEY}"
+          - name: "gpt-4"
+            provider: "openai"
+            model_name: "gpt-4"
+            system_prompt: "You are a professional news anchor scriptwriter. Create engaging, professional news scripts suitable for television broadcast."
+            api_url: "https://api.openai.com/v1"
+            api_key: "${OPENAI_API_KEY}"
+
+      # 语音合成选择器
+      VoiceSynthesizer:
+        module: news/voice_synthesizer/news_voice_handler
+        enabled: true
+        tts_options:
+          - name: "xiaoxiao_zh"
+            provider: "edge_tts"
+            voice: "zh-CN-XiaoxiaoNeural"
+            sample_rate: 24000
+            description: "晓晓-中文女声"
+# Commented out - voice not available
+          # - name: "xiaochen_zh"
+          #   provider: "edge_tts"
+          #   voice: "zh-CN-XiaochenNeural"
+          #   sample_rate: 24000
+          #   description: "晓晨-中文女声"
+          - name: "yunjian_zh"
+            provider: "edge_tts"
+            voice: "zh-CN-YunjianNeural"
+            sample_rate: 24000
+            description: "云健-中文男声"
+          - name: "cosyvoice_longxiaocheng"
+            provider: "bailian_cosyvoice"
+            voice: "longxiaocheng"
+            model_name: "cosyvoice-v1"
+            api_key: "${DASHSCOPE_API_KEY}"
+            description: "龙小诚-阿里云CosyVoice"
+          - name: "cosyvoice_longshu"
+            provider: "bailian_cosyvoice"
+            voice: "longshu"
+            model_name: "cosyvoice-v1"
+            api_key: "${DASHSCOPE_API_KEY}"
+            description: "龙舒-阿里云CosyVoice"
+          # 其他语音选项 - 简化配置
+          - name: "yunyang_zh"
+            provider: "edge_tts"
+            voice: "zh-CN-YunyangNeural"
+            sample_rate: 24000
+            description: "云扬-中文男声(专业播音)"
+
+      # 数字人渲染选择器
+      AvatarRenderer:
+        module: news/avatar_renderer/news_avatar_handler
+        enabled: true
+        avatar_options:
+          - name: "xiaohui_teacher"
+            provider: "liteavatar"
+            avatar_name: "sample_data"
+            fps: 25
+            use_gpu: false
+            description: "小慧老师-教学风格"
+          - name: "news_anchor_female"
+            provider: "liteavatar"
+            avatar_name: "20250408/female_news_anchor"
+            fps: 25
+            use_gpu: false
+            description: "女主播-新闻风格"
+          - name: "news_anchor_male"
+            provider: "liteavatar"
+            avatar_name: "20250408/male_news_anchor"
+            fps: 25
+            use_gpu: false
+            description: "男主播-新闻风格"
+          - name: "muse_news_anchor"
+            provider: "musetalk"
+            fps: 20
+            batch_size: 2
+            avatar_video_path: "src/handlers/avatar/musetalk/MuseTalk/data/video/news_anchor.mp4"
+            avatar_model_dir: "models/musetalk/avatar_model"
+            description: "MuseTalk新闻主播"
+          - name: "lam_professional"
+            provider: "lam"
+            asset_path: "src/handlers/client/h5_rendering_client/lam_samples/professional_news.zip"
+            concurrent_limit: 5
+            description: "LAM专业主播"
+
+      # 视频生成引擎
+      VideoGenerator:
+        module: news/video_generator/news_video_handler
+        enabled: true
+        output_formats:
+          - "mp4"
+          - "webm"
+          - "avi"
+        quality_options:
+          - name: "high"
+            resolution: "1920x1080"
+            bitrate: "8000k"
+            fps: 30
+          - name: "medium"
+            resolution: "1280x720"
+            bitrate: "4000k"
+            fps: 25
+          - name: "low"
+            resolution: "854x480"
+            bitrate: "2000k"
+            fps: 24
+
+# 新闻播报特定配置
+news_broadcast:
+  # 新闻类型配置
+  news_categories:
+    - name: "时政新闻"
+      description: "政治、经济、社会等时政新闻"
+      style: "正式严肃"
+      length: "medium"
+    - name: "财经资讯"
+      description: "金融市场、商业动态"
+      style: "专业客观"
+      length: "medium"
+    - name: "科技前沿"
+      description: "科技创新、互联网动态"
+      style: "生动现代"
+      length: "medium"
+    - name: "体育赛事"
+      description: "体育比赛、运动员动态"
+      style: "激情活泼"
+      length: "short"
+    - name: "生活服务"
+      description: "民生资讯、生活服务"
+      style: "亲切贴心"
+      length: "short"
+
+  # 播报风格配置
+  broadcast_styles:
+    - name: "正式播报"
+      description: "适合重大新闻，语气严肃正式"
+      speed: "medium"
+      emotion: "neutral"
+    - name: "亲和播报"
+      description: "适合民生新闻，语气亲切自然"
+      speed: "slow"
+      emotion: "warm"
+    - name: "生动播报"
+      description: "适合科技体育新闻，语气生动活泼"
+      speed: "medium"
+      emotion: "enthusiastic"
+
+  # 默认配置
+  defaults:
+    llm_provider: "qwen-plus"
+    voice_provider: "xiaoxiao_zh"
+    avatar_provider: "xiaohui_teacher"
+    quality: "high"
+    style: "formal"
+
+  # 输出配置 - 优化存储结构
+  output:
+    base_dir: "output/news_broadcast"
+    # 播客音频专用存储
+    podcast_dir: "output/news_broadcast/podcasts"      # 播客音频存储
+    # 数字人视频专用存储  
+    video_dir: "output/news_broadcast/videos"          # 数字人视频存储
+    # 其他目录
+    temp_dir: "temp/news_processing"
+    max_file_size: "500MB"
+    retention_days: 30
+    # 文件命名规则
+    naming:
+      podcast: "{timestamp}_{voice}_{category}_podcast"       # 播客命名格式
+      video: "{timestamp}_{voice}_{avatar}_{category}_video"  # 视频命名格式
+      timestamp_format: "%Y%m%d_%H%M%S"                       # 时间戳格式
+
+  # 性能配置
+  performance:
+    max_concurrent_jobs: 3
+    processing_timeout: 600  # 10分钟超时
+    memory_limit: "8GB"
+
+# 环境变量配置
+environment:
+  required_vars:
+    - "DASHSCOPE_API_KEY"
+  optional_vars:
+    - "OPENAI_API_KEY"
+    - "HF_TOKEN"

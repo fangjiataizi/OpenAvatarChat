@@ -133,7 +133,7 @@ class ClientHandlerRtc(ClientHandlerBase):
             input_sample_rate=16000,
             output_sample_rate=24000,
             output_frame_size=480,
-            fps=30,
+            fps=25,  # Match LiteAvatar fps
             stream_start_delay=0.5,
         )
         self.rtc_streamer_factory.client_handler_delegate = self.handler_delegate
